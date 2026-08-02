@@ -1,9 +1,6 @@
 import os
-from typing import Dict, Any, Optional
 import pandas as pd
-from pydantic import BaseModel, Field
-
-# 1. Pydantic Schema để Validate Dữ liệu đọc từ CSV
+from pydantic import BaseModel
 
 
 class CorporateCreditReportSchema(BaseModel):
@@ -15,8 +12,10 @@ class CorporateCreditReportSchema(BaseModel):
     overdue_36m_count: int
     total_current_debt: float
     internal_rating: str
-
-# 2. Service truy vấn CSDL CSV
+    total_liabilities: float = 0.0
+    owner_equity: float = 1.0  # Tránh chia cho 0
+    ebitda: float = 0.0
+    annual_debt_service: float = 1.0  # Tránh chia cho 0
 
 
 class CSVBankingService:
@@ -25,31 +24,26 @@ class CSVBankingService:
         self._load_data()
 
     def _load_data(self):
-        """Đọc và cache file CSV vào bộ nhớ RAM"""
         if not os.path.exists(self.csv_file_path):
             raise FileNotFoundError(f"Không tìm thấy file CSDL CSV tại: {self.csv_file_path}")
-
-        # Đọc MST dưới dạng string để không bị mất số 0 ở đầu
         self.df = pd.read_csv(self.csv_file_path, dtype={"company_tax_code": str})
 
     async def fetch_credit_report(self, tax_code: str) -> CorporateCreditReportSchema:
-        """Truy vấn bản ghi doanh nghiệp theo Mã số thuế (MST)"""
-        # Lọc bản ghi theo tax_code
         matched = self.df[self.df["company_tax_code"] == tax_code]
-
         if matched.empty:
-            # Dữ liệu fallback mặc định nếu không tìm thấy MST trong CSV
             return CorporateCreditReportSchema(
                 company_tax_code=tax_code,
-                company_name="Doanh nghiệp Chưa có trên Hệ thống CRM",
-                establishment_year=2024,
-                debt_group="Nhóm 1 - Nợ chuẩn",
-                credit_score=600,
+                company_name="Không tìm thấy doanh nghiệp",
+                establishment_year=0,
+                debt_group="N/A",
+                credit_score=0,
                 overdue_36m_count=0,
                 total_current_debt=0.0,
-                internal_rating="B"
+                internal_rating="N/A",
+                total_liabilities=0.0,
+                owner_equity=0.0,
+                ebitda=0.0,
+                annual_debt_service=0.0
             )
-
-        # Chuyển dòng dữ liệu đầu tiên thành Dictionary
         record = matched.iloc[0].to_dict()
         return CorporateCreditReportSchema(**record)
