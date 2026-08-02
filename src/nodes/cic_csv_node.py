@@ -7,13 +7,14 @@ from src.services.csv_banking_service import CSVBankingService  # Service đọc
 # Khởi tạo service đọc dữ liệu
 banking_service = CSVBankingService()
 
-
 async def cic_csv_node(state: UnderwritingState) -> Dict[str, Any]:
     tax_code = state.get("company_tax_code", "")
-
+    
     # 1. Gọi Service lấy dữ liệu và GÁN VÀO BIẾN `cic_data`
     report = await banking_service.fetch_credit_report(tax_code)
-
+    
+    # Nếu không tìm thấy, tạo dict mặc định để tránh crash
+    cic_data = report.model_dump() if report 
     # Tạo log thông báo hiển thị cho RM Dashboard
     status_msg = (
         f"✅ **[CIC & CRM CSV Service]:** Đã tra cứu dữ liệu MST {tax_code}.\n"
@@ -30,7 +31,7 @@ async def cic_csv_node(state: UnderwritingState) -> Dict[str, Any]:
 
     # 3. Trả về State (đảm bảo biến cic_data đã được định nghĩa ở trên)
     return {
-        "cic_status": report,
+        "cic_status": cic_data,
         "completed_steps": completed,
         "messages": [AIMessage(content=f"{status_msg}")]
     }

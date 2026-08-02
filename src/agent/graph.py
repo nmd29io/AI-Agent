@@ -1,38 +1,52 @@
 from langgraph.graph import StateGraph, START, END
 from src.schemas.underwriting_state import UnderwritingState
 
-# Import 4 Nodes đã xây dựng
+# Import Supervisor và các Nodes
+from src.nodes.supervisor_node import supervisor_node, route_next
 from src.nodes.cic_csv_node import cic_csv_node
 from src.nodes.financial_calc_node import financial_calculator_node
 from src.nodes.rag_compliance_node import rag_compliance_node
 from src.nodes.underwriting_specialist_node import underwriting_specialist_node
 
 
-def build_underwriting_graph():
+def build_supervisor_underwriting_graph():
     """
-    Hàm khởi tạo và đóng gói luồng StateGraph cho AI Agent Thẩm định Tín dụng.
-    Luồng thực thi: START ➔ Node 1 (CIC) ➔ Node 2 (Financial) ➔ Node 3 (RAG) ➔ Node 4 (LLM Underwriter) ➔ END
+    Khởi tạo Workflow Thẩm định Tín dụng dạng Supervisor Multi-Agent Graph.
     """
-    # 1. Khởi tạo StateGraph với State dùng chung
     workflow = StateGraph(UnderwritingState)
 
-    # 2. Đăng ký các Node vào Workflow
+    # 1. Đăng ký tất cả các Node
+    workflow.add_node("supervisor", supervisor_node)
     workflow.add_node("node_cic_crm", cic_csv_node)
     workflow.add_node("node_financial_calc", financial_calculator_node)
     workflow.add_node("node_rag_compliance", rag_compliance_node)
     workflow.add_node("node_underwriting_specialist", underwriting_specialist_node)
 
-    # 3. Thiết lập Luồng di chuyển (Edges)
-    workflow.add_edge(START, "node_cic_crm")
-    workflow.add_edge("node_cic_crm", "node_financial_calc")
-    workflow.add_edge("node_financial_calc", "node_rag_compliance")
-    workflow.add_edge("node_rag_compliance", "node_underwriting_specialist")
-    workflow.add_edge("node_underwriting_specialist", END)
+    # 2. Bắt đầu luồng luôn luôn từ Supervisor
+    workflow.add_edge(START, "supervisor")
 
-    # 4. Biên dịch (Compile) Graph
+    # 3. Thiết lập Rẽ nhánh Điều kiện (Conditional Edges) từ Supervisor sang các Agent
+    workflow.add_conditional_edges(
+        "supervisor",
+        route_next,
+        {
+            "node_cic_crm": "node_cic_crm",
+            "node_financial_calc": "node_financial_calc",
+            "node_rag_compliance": "node_rag_compliance",
+            "node_underwriting_specialist": "node_underwriting_specialist",
+            "END": END
+        }
+    )
+
+    # 4. Sau khi mỗi Chuyên gia xử lý xong ➔ Quay lại Supervisor để đánh giá tiếp
+    workflow.add_edge("node_cic_crm", "supervisor")
+    workflow.add_edge("node_financial_calc", "supervisor")
+    workflow.add_edge("node_rag_compliance", "supervisor")
+    workflow.add_edge("node_underwriting_specialist", "supervisor")
+
+    # 5. Biên dịch Graph
     app = workflow.compile()
     return app
 
 
-# Khởi tạo instance app sẵn sàng để import sử dụng ở UI / API
-app = build_underwriting_graph()
+app = build_supervisor_underwriting_graph()

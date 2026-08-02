@@ -11,7 +11,7 @@ from src.nodes.financial_calc_node import financial_calculator_node
 async def run_test():
     # Mô phỏng State chứa dữ liệu từ Node 1
     mock_state = {
-        "company_tax_code": "9999999999", # MST của Beta Corp (đòn bẩy cao D/E = 5.0)
+        "company_tax_code": "0309998887", # MST của Beta Corp (đòn bẩy cao D/E = 5.0)
         "cic_status": {
             "total_liabilities": 50_000_000_000.0,
             "owner_equity": 10_000_000_000.0,

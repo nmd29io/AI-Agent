@@ -56,7 +56,7 @@ async def financial_calculator_node(state: UnderwritingState) -> Dict[str, Any]:
         warning_notes=warnings
     )
 
-    # 3. TẠO MESSAGE HIỂN THỊ DẠNG MARKDOWN CHO UI
+    # 3. TẠO MESSAGE HIỂN THỊ DẠNG MARKDOWN 
     status_msg = (
         f"📊 **[Financial Calculator Node]:** Đã phân tích xong BCTC.\n"
         f"- **Hệ số Nợ / VCSH (D/E):** `{de_ratio}` (Chuẩn: <= {DE_BENCHMARK}) ──► {'✅ An toàn' if is_de_safe else '❌ Rủi ro cao'}\n"

@@ -13,7 +13,7 @@ async def run_supervisor_test():
     print("🚀 --- KIỂM THỬ SUPERVISOR MULTI-AGENT GRAPH --- 🚀\n")
 
     initial_input = {
-        "company_tax_code": "0309998887", # Công ty Gamma (Vi phạm pháp lý)
+        "company_tax_code": "7855258141", # Công ty Gamma (Vi phạm pháp lý)
         "loan_amount_requested": 10_000_000_000.0,
         "loan_purpose": "Vay vốn để đảo nợ ngân hàng khác",
         "completed_steps": []
