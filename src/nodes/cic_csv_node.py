@@ -14,7 +14,13 @@ async def cic_csv_node(state: UnderwritingState) -> Dict[str, Any]:
     report = await banking_service.fetch_credit_report(tax_code)
     
     # Nếu không tìm thấy, tạo dict mặc định để tránh crash
-    cic_data = report.model_dump() if report 
+    cic_data = report.model_dump() if report else {
+        # "company_name": "Không tìm thấy doanh nghiệp",
+        # # "debt_group": "N/A",
+        # # "credit_score": 0,
+        # # "overdue_36m_count": 0,
+        # # "total_current_debt": 0.0
+    }
     # Tạo log thông báo hiển thị cho RM Dashboard
     status_msg = (
         f"✅ **[CIC & CRM CSV Service]:** Đã tra cứu dữ liệu MST {tax_code}.\n"

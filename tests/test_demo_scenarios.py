@@ -10,7 +10,7 @@ from dotenv import load_dotenv
 # Load env variables
 load_dotenv(override=True)
 
-from src.graph import app
+from src.agent.graph import app
 
 # Danh sách 3 Kịch bản Demo
 DEMO_SCENARIOS = [
