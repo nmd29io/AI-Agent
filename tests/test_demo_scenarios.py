@@ -17,7 +17,7 @@ DEMO_SCENARIOS = [
     {
         "scenario_name": "KỊCH BẢN 1: Alpha Corp - Hồ sơ Đủ điều kiện (Chuẩn)",
         "input": {
-            "company_tax_code": "0101234567",
+            "company_tax_code": "1277933982",
             "loan_amount_requested": 8_000_000_000.0,
             "loan_purpose": "Bổ sung vốn lưu động mua nguyên vật liệu sản xuất hạt nhựa",
         }
@@ -25,7 +25,7 @@ DEMO_SCENARIOS = [
     {
         "scenario_name": "KỊCH BẢN 2: Beta Corp - Rủi ro Đòn bẩy cao & DSCR Yếu",
         "input": {
-            "company_tax_code": "0207654321",
+            "company_tax_code": "0128265885",
             "loan_amount_requested": 15_000_000_000.0,
             "loan_purpose": "Mở rộng xưởng sản xuất và mua máy móc thiết bị mới",
         }
@@ -33,7 +33,7 @@ DEMO_SCENARIOS = [
     {
         "scenario_name": "KỊCH BẢN 3: Gamma Corp - Vi phạm Quy định Pháp lý (Đảo nợ / BĐS)",
         "input": {
-            "company_tax_code": "0309998887",
+            "company_tax_code": "6917580190",
             "loan_amount_requested": 10_000_000_000.0,
             "loan_purpose": "Vay vốn để cơ cấu lại nợ và đảo nợ ngân hàng khác",
         }
