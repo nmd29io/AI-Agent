@@ -13,6 +13,14 @@ from pydantic import BaseModel, Field
 
 from src.nodes.rag_compliance_node import RagLegalEngine
 from src.services.csv_banking_service import CSVBankingService
+from src.services.credit_report_template import (
+    render_credit_appraisal_report,
+    format_currency_vnd,
+)
+from src.schemas.underwriting_schema import (
+    CreditDecisionEnum,
+    LLMAssessmentOutput,
+)
 
 # Nạp biến môi trường từ .env
 load_dotenv(override=True)
@@ -92,10 +100,25 @@ class UnderwritingAssessmentSchema(BaseModel):
         description="Mức độ rủi ro (Thấp, Trung bình, Cao, Rất cao)"
     )
     summary_notes: str = Field(
-        description="Tóm tắt lý do chính cho phán quyết"
+        default="", description="Tóm tắt lý do chính cho phán quyết"
+    )
+    key_strengths: List[str] = Field(
+        default_factory=list, description="Các điểm mạnh chính của hồ sơ"
+    )
+    key_risks: List[str] = Field(
+        default_factory=list, description="Các yếu tố rủi ro chính cần lưu ý"
+    )
+    conditions_precedent: List[str] = Field(
+        default_factory=list, description="Điều kiện tiên quyết trước giải ngân"
+    )
+    post_disbursement_monitoring: List[str] = Field(
+        default_factory=list, description="Điều kiện quản lý và giám sát sau giải ngân"
     )
     markdown_report: str = Field(
-        description="Toàn bộ Tờ trình Thẩm định Tín dụng dạng Markdown"
+        default="", description="Toàn bộ Tờ trình Thẩm định Tín dụng dạng Markdown chuẩn 7 phần"
+    )
+    submission_report_markdown: Optional[str] = Field(
+        default=None, description="Đồng bộ với markdown_report"
     )
 
 
@@ -274,6 +297,21 @@ def _fallback_underwriting(state: UnderwritingState) -> Dict[str, Any]:
     is_bad_cic = any(x in debt_group for x in ["Nhóm 3", "Nhóm 4", "Nhóm 5"])
     is_warning_cic = "Nhóm 2" in debt_group
 
+    strengths = []
+    risks = []
+    conditions_prec = [
+        "Cung cấp đầy đủ hồ sơ pháp lý, đăng ký kinh doanh và điều lệ doanh nghiệp cập nhật hợp lệ.",
+        "Cung cấp Hợp đồng kinh tế đầu vào/đầu ra, hóa đơn GTGT hợp lệ chứng minh phương án sử dụng vốn đúng mục đích.",
+        "Ký kết Hợp đồng tín dụng, Hợp đồng thế chấp và hoàn tất thủ tục công chứng, đăng ký biện pháp bảo đảm (nếu có yêu cầu TSĐB).",
+        "Cam kết mở tài khoản thanh toán và chuyển tối thiểu 80% doanh thu bán hàng về tài khoản tại ngân hàng.",
+    ]
+    post_monitoring = [
+        "Thực hiện kiểm tra mục đích sử dụng vốn vay trong vòng 30 ngày kể từ ngày giải ngân từng khế ước nhận nợ.",
+        "Định kỳ hàng quý rà soát Báo cáo tài chính, tờ khai thuế GTGT và sao kê tài khoản doanh thu của khách hàng.",
+        "Giám sát chặt chẽ trạng thái tín dụng CIC tại các TCTD khác để cảnh báo sớm nếu phát sinh nợ quá hạn.",
+        "Duy trì tỷ lệ an toàn tài chính: Đảm bảo hệ số D/E không vượt quá 2.5 và DSCR không thấp hơn 1.2 trong suốt thời hạn vay.",
+    ]
+
     # 1. BẮT BUỘC TỪ CHỐI nếu vi phạm pháp lý, nợ xấu nhóm >= 3, DSCR < 1.0, hoặc D/E sau vay > 4.0
     if not is_legal_ok or de > 4.0 or pro_forma_de > 4.0 or dscr < 1.0 or is_bad_cic:
         decision = DecisionEnum.REJECT.value
@@ -282,70 +320,79 @@ def _fallback_underwriting(state: UnderwritingState) -> Dict[str, Any]:
         reasons = []
         if not is_legal_ok:
             reasons.append("Mục đích vay vi phạm quy định pháp lý NHNN (Thông tư 39)")
+            risks.append("Vi phạm quy định pháp lý bắt buộc theo Thông tư 39/2016/TT-NHNN.")
         if is_bad_cic:
             reasons.append(f"Lịch sử tín dụng CIC xấu ({debt_group})")
+            risks.append(f"CIC thuộc nhóm nợ xấu ({debt_group}), điểm tín dụng rất thấp.")
         if de > 4.0:
             reasons.append(f"Đòn bẩy tài chính hiện tại quá cao (D/E = {de} > 4.0)")
+            risks.append(f"Hệ số đòn bẩy tài chính Nợ/VCSH hiện tại (D/E = {de}) vượt xa mức an toàn.")
         if pro_forma_de > 4.0 and de <= 4.0:
             reasons.append(
                 f"Khoản vay đề nghị ({loan_requested:,.0f} VNĐ) vượt quá xa năng lực vốn CSH ({equity:,.0f} VNĐ), đẩy đòn bẩy D/E sau vay lên {pro_forma_de} (vượt ngưỡng từ chối 4.0)"
             )
+            risks.append(f"Đòn bẩy dự phóng sau giải ngân (Pro-forma D/E = {pro_forma_de}) vượt trần từ chối 4.0.")
         if dscr < 1.0:
             reasons.append(f"Khả năng trả nợ yếu (DSCR = {dscr} < 1.0)")
+            risks.append(f"Khả năng trả nợ không bảo đảm (DSCR = {dscr} < 1.0), thâm hụt dòng tiền thanh toán nợ.")
         summary = "Từ chối cấp tín dụng do: " + "; ".join(reasons) + "."
 
     # 2. CẦN BỔ SUNG HỒ SƠ / TÀI SẢN ĐẢM BẢO
     elif is_warning_cic or de > 2.5 or pro_forma_de > 2.5 or dscr < 1.2 or legal.get("has_warnings"):
         decision = DecisionEnum.REQUIRE_MORE_INFO.value
-        # Hạn mức đề xuất bị khống chế tối đa ở mức an toàn
         limit = min(loan_requested, max_safe_limit if max_safe_limit > 0 else round(loan_requested * 0.7, -6))
         risk = "Trung bình"
         reasons = []
         if is_warning_cic:
             reasons.append(f"CIC thuộc {debt_group}")
+            risks.append(f"Khách hàng thuộc {debt_group}, có lịch sử nợ quá hạn cần theo dõi.")
         if de > 2.5:
             reasons.append(f"Hệ số D/E hiện tại = {de} > 2.5")
+            risks.append(f"Đòn bẩy tài chính hiện tại cao (D/E = {de} > 2.5).")
         if pro_forma_de > 2.5 and de <= 2.5:
             reasons.append(f"Khoản vay đẩy D/E sau vay lên {pro_forma_de} > 2.5")
+            risks.append(f"Quy mô khoản vay đẩy đòn bẩy sau vay lên {pro_forma_de} vượt trần an toàn 2.5.")
         if dscr < 1.2:
             reasons.append(f"Hệ số DSCR = {dscr} < 1.2")
-        summary = f"Cần bổ sung tài sản đảm bảo hoặc hoàn thiện hồ sơ: {'; '.join(reasons)}. Khuyến nghị khống chế trần hạn mức an toàn: {limit:,.0f} VNĐ."
+            risks.append(f"Hệ số DSCR = {dscr} dưới mức an toàn 1.2, cần giám sát dòng tiền chặt chẽ.")
+        summary = f"Cần bổ sung tài sản đảm bảo thanh khoản cao hoặc giảm quy mô vay: {'; '.join(reasons)}. Khuyến nghị khống chế trần hạn mức an toàn: {limit:,.0f} VNĐ."
+        strengths.append("Doanh nghiệp có năng lực hoạt động thực tế và phương án kinh doanh cụ thể.")
+        conditions_prec.append(f"Bổ sung tài sản đảm bảo bằng Bất động sản/Tiền gửi có giá trị tối thiểu bằng 120% hạn mức cấp tín dụng ({format_currency_vnd(limit)}).")
 
     # 3. ĐỒNG Ý CẤP TÍN DỤNG
     else:
         decision = DecisionEnum.APPROVE.value
         limit = min(loan_requested, max_safe_limit if max_safe_limit > 0 else loan_requested)
         risk = "Thấp"
-        summary = "Hồ sơ đáp ứng đầy đủ tiêu chuẩn tín dụng, an toàn tài chính và quy mô khoản vay hoàn toàn phù hợp với năng lực vốn chủ sở hữu."
+        summary = "Hồ sơ đáp ứng đầy đủ tiêu chuẩn tín dụng, an toàn tài chính, đòn bẩy sau giải ngân nằm trong trần an toàn và quy mô khoản vay hoàn toàn phù hợp với năng lực vốn chủ sở hữu."
+        strengths.append("Mục đích vay vốn hợp pháp, tuân thủ Thông tư 39/2016/TT-NHNN.")
+        strengths.append(f"Lịch sử tín dụng CIC tốt ({debt_group}), không có nợ quá hạn.")
+        strengths.append(f"Cấu trúc tài chính lành mạnh: D/E hiện tại = {de:.2f} <= 2.5; D/E sau vay = {pro_forma_de:.2f} <= 2.5.")
+        strengths.append(f"Khả năng trả nợ tốt: DSCR = {dscr:.2f} >= 1.2.")
+        risks.append("Kiểm soát chặt chẽ dòng tiền doanh thu bán hàng về tài khoản tại ngân hàng.")
 
-    markdown_report = f"""# TỜ TRÌNH THẨM ĐỊNH TÍN DỤNG DOANH NGHIỆP
-
-**Khách hàng:** {state.get('company_name', 'Doanh nghiệp')} (MST: {state.get('company_tax_code', 'N/A')})  
-**Số tiền đề nghị:** `{loan_requested:,.0f} VNĐ` | **Mục đích:** {state.get('loan_purpose', 'N/A')}
-
----
-
-### I. ĐỀ XUẤT PHÁN QUYẾT
-* **Kết quả:** **{decision}**
-* **Hạn mức đề xuất:** `{limit:,.0f} VNĐ`
-* **Mức độ rủi ro:** **{risk}**
-
-### II. ĐÁNH GIÁ CHI TIẾT
-* **Lịch sử tín dụng CIC:** {cic.get('debt_group', 'N/A')} (Điểm: `{cic.get('credit_score', 0)}`, Dư nợ hiện tại: `{cic.get('total_current_debt', 0):,.0f} VNĐ`, Quá hạn 36T: `{cic.get('overdue_36m_count', 0)}` lần)
-* **Đòn bẩy tài chính hiện tại (D/E):** `{de}` (Quy định: $\\le 2.5$)
-* **Đòn bẩy tài chính dự phóng sau vay:** `{pro_forma_de}` (Trần an toàn: $\\le 2.5$, Ngưỡng từ chối: $> 4.0$)
-* **Khả năng trả nợ (DSCR):** `{dscr}` (Quy định: $\\ge 1.2$)
-* **Pháp lý NHNN:** {'✅ Tuân thủ Thông tư 39/2016/TT-NHNN' if is_legal_ok else '❌ Vi phạm quy định cấm cho vay'}
-
-### III. TÓM TẮT LÝ DO & ĐIỀU KIỆN
-{summary}
-"""
+    markdown_report = render_credit_appraisal_report(
+        state=state,
+        decision=decision,
+        recommended_credit_limit=limit,
+        risk_level=risk,
+        summary_notes=summary,
+        key_strengths=strengths,
+        key_risks=risks,
+        conditions_precedent=conditions_prec,
+        post_disbursement_monitoring=post_monitoring,
+    )
     return {
         "decision": decision,
         "recommended_credit_limit": limit,
         "risk_level": risk,
         "summary_notes": summary,
+        "key_strengths": strengths,
+        "key_risks": risks,
+        "conditions_precedent": conditions_prec,
+        "post_disbursement_monitoring": post_monitoring,
         "markdown_report": markdown_report,
+        "submission_report_markdown": markdown_report,
     }
 
 
@@ -368,13 +415,12 @@ async def underwriting_specialist_node(state: UnderwritingState) -> Dict[str, An
                 model="gemini-2.5-flash",
                 google_api_key=api_key,
                 temperature=0.2,
+                request_timeout=25,
             )
-            structured_llm = llm.with_structured_output(
-                UnderwritingAssessmentSchema
-            )
+            structured_llm = llm.with_structured_output(LLMAssessmentOutput)
 
             prompt = f"""
-            Bạn là Chuyên viên Thẩm định Tín dụng Doanh nghiệp Cấp cao tại Ngân hàng. Hãy phân tích hồ sơ và lập Tờ trình Thẩm định Tín dụng chi tiết:
+            Bạn là Chuyên viên Thẩm định Tín dụng Doanh nghiệp Cấp cao tại Ngân hàng. Hãy phân tích hồ sơ và đưa ra phán quyết, đánh giá rủi ro, điểm mạnh, điều kiện cấp tín dụng:
             
             - Doanh nghiệp: {comp_name} (MST: {tax_code})
             - Vốn chủ sở hữu (VCSH): {fin.get('equity', 0):,.0f} VNĐ | EBITDA: {fin.get('ebitda', 0):,.0f} VNĐ
@@ -391,13 +437,25 @@ async def underwriting_specialist_node(state: UnderwritingState) -> Dict[str, An
             1. Bắt buộc TỪ CHỐI CẤP TÍN DỤNG: Nếu D/E dự phóng sau vay > 4.0 (khoản vay quá lớn so với vốn CSH) HOẶC D/E hiện tại > 4.0 HOẶC DSCR < 1.0 HOẶC Vi phạm pháp lý HOẶC Nhóm nợ CIC >= Nhóm 3.
             2. CẦN BỔ SUNG HỒ SƠ / TÀI SẢN ĐẢM BẢO: Nếu D/E sau vay nằm trong khoảng 2.5 - 4.0 HOẶC Nhóm nợ 2 HOẶC DSCR 1.0 - 1.2. Hạn mức đề xuất không được vượt quá hạn mức an toàn ({fin.get('max_safe_limit', 0):,.0f} VNĐ).
             3. ĐỒNG Ý CẤP TÍN DỤNG: Chỉ khi tất cả các chỉ số (kể cả D/E sau vay <= 2.5) đều đạt chuẩn.
-            4. Viết Báo cáo Markdown đầy đủ các mục: I. Tóm tắt Đề xuất & Hạn mức, II. Phân tích Tài chính & Khả năng hấp thụ nợ, III. Tín nhiệm CIC & Pháp lý, IV. Kết luận & Điều kiện đi kèm.
             """
 
-            assessment_res: UnderwritingAssessmentSchema = (
-                await structured_llm.ainvoke(prompt)
+            llm_res: LLMAssessmentOutput = await structured_llm.ainvoke(prompt)
+            report_md = render_credit_appraisal_report(
+                state=state,
+                decision=llm_res.decision.value,
+                recommended_credit_limit=llm_res.recommended_credit_limit,
+                risk_level=llm_res.risk_level,
+                summary_notes=llm_res.summary_notes,
+                key_strengths=llm_res.key_strengths,
+                key_risks=llm_res.key_risks,
+                conditions_precedent=llm_res.conditions_precedent,
+                post_disbursement_monitoring=llm_res.post_disbursement_monitoring,
             )
-            result_dict = assessment_res.model_dump()
+            result_dict = {
+                **llm_res.model_dump(),
+                "markdown_report": report_md,
+                "submission_report_markdown": report_md,
+            }
         except Exception:
             result_dict = _fallback_underwriting(state)
     else:
@@ -802,8 +860,44 @@ if "final_state" in st.session_state:
 
         st.markdown("---")
 
-        # Markdown Report Output
-        st.markdown(assessment.get("markdown_report", "Không có báo cáo."))
+        report_content = (
+            assessment.get("markdown_report")
+            or assessment.get("submission_report_markdown")
+            or "Không có báo cáo."
+        )
+
+        col_head_left, col_head_right = st.columns([3, 1])
+        with col_head_left:
+            st.markdown(
+                f"### 📋 Bản Thẩm Định Nghiệp Vụ Chính Thức ({state.get('company_name')})"
+            )
+        with col_head_right:
+            st.download_button(
+                label="📥 Tải Tờ trình (.md)",
+                data=report_content,
+                file_name=f"To_Trinh_Tham_Dinh_{state.get('company_tax_code', 'DN')}.md",
+                mime="text/markdown",
+                use_container_width=True,
+            )
+
+        # Hiển thị Tờ trình trong khung phong cách tài liệu ngân hàng trang trọng
+        st.markdown(
+            """
+            <div style="
+                border: 1px solid #e2e8f0; 
+                border-radius: 10px; 
+                padding: 28px; 
+                background-color: #ffffff; 
+                box-shadow: 0 4px 12px rgba(0, 0, 0, 0.04);
+                margin-top: 12px;
+                margin-bottom: 25px;
+                color: #1a202c;
+            ">
+            """,
+            unsafe_allow_html=True,
+        )
+        st.markdown(report_content)
+        st.markdown("</div>", unsafe_allow_html=True)
 
     with tab_graph:
         st.subheader(
